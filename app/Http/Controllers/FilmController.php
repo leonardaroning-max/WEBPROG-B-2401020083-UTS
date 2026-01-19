@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use App\Models\Film;
 
 class FilmController extends Controller
 {
@@ -18,6 +19,10 @@ class FilmController extends Controller
         $this->image = env('TMDB_IMAGE', 'https://image.tmdb.org/t/p/w500');
     }
 
+    /* =======================
+       BAGIAN API TMDB (LAMA)
+       ======================= */
+
     private function fetch($url, $params = [])
     {
         $params['api_key'] = $this->api;
@@ -26,12 +31,19 @@ class FilmController extends Controller
     }
 
     public function home()
-    {
-        $data = $this->fetch('/movie/popular', ['language' => 'en-US']);
-        $films = $data['results'] ?? [];
-        $genres = $this->getGenres();
-        return view('home', compact('films', 'genres'))->with('image', $this->image);
-    }
+   {
+    // Film dari TMDB
+    $data = $this->fetch('/movie/popular', ['language' => 'en-US']);
+    $tmdbFilms = $data['results'] ?? [];
+
+    // Film dari Database
+    $dbFilms = Film::latest()->get();
+
+    $genres = $this->getGenres();
+
+    return view('home', compact('tmdbFilms', 'dbFilms', 'genres'))
+        ->with('image', $this->image);
+}
 
     public function genre($genreName)
     {
@@ -56,34 +68,38 @@ class FilmController extends Controller
         $films = $data['results'] ?? [];
 
         return view('genre', compact('films', 'genres'))
-            ->with(['genreName' => ucfirst($genreName), 'image' => $this->image]);
+            ->with([
+                'genreName' => ucfirst($genreName),
+                'image' => $this->image
+            ]);
     }
 
     public function detail($id)
-{
-    $movie = $this->fetch("/movie/{$id}", [
-        'language' => 'en-US',
-        'append_to_response' => 'videos'
-    ]);
+    {
+        $movie = $this->fetch("/movie/{$id}", [
+            'language' => 'en-US',
+            'append_to_response' => 'videos'
+        ]);
 
-    if (!$movie) {
-        abort(404, 'Movie not found');
-    }
+        if (!$movie) {
+            abort(404, 'Movie not found');
+        }
 
-    // Filter hanya YouTube Trailer
-    $trailers = [];
-    if (!empty($movie['videos']['results']) && is_array($movie['videos']['results'])) {
-        foreach ($movie['videos']['results'] as $video) {
-            if (isset($video['site'], $video['type']) && $video['site'] === 'YouTube' && $video['type'] === 'Trailer') {
-                $trailers[] = $video;
+        $trailers = [];
+        if (!empty($movie['videos']['results'])) {
+            foreach ($movie['videos']['results'] as $video) {
+                if (
+                    isset($video['site'], $video['type']) &&
+                    $video['site'] === 'YouTube' &&
+                    $video['type'] === 'Trailer'
+                ) {
+                    $trailers[] = $video;
+                }
             }
         }
+
+        return view('movie', compact('movie', 'trailers'));
     }
-
-    // Pastikan view file ada di resources/views/movie_detail.blade.php
-    return view('movie', compact('movie', 'trailers',));
-
-}
 
     public function tvSeries()
     {
@@ -99,5 +115,68 @@ class FilmController extends Controller
     {
         $data = $this->fetch('/genre/movie/list', ['language' => 'en-US']);
         return $data['genres'] ?? [];
+    }
+
+    /* =========================
+       BAGIAN DATABASE (BARU)
+       ========================= */
+
+    // Form tambah film (database)
+    public function create()
+    {
+        return view('films.create');
+    }
+
+    // Simpan film ke MySQL
+    public function store(Request $request)
+{
+    $request->validate([
+        'title' => 'required',
+        'poster' => 'required|url',
+        'rating' => 'required|numeric',
+        'trailer' => 'nullable|url',
+    ]);
+
+    Film::create($request->all());
+
+    return redirect()->route('home')->with('success', 'Film berhasil ditambahkan');
+}
+
+
+    // Form edit film
+    public function edit(Film $film)
+    {
+        return view('films.edit', compact('film'));
+    }
+
+    // Update film
+    public function update(Request $request, Film $film)
+{
+    $request->validate([
+        'title' => 'required',
+        'poster' => 'required|url',
+        'rating' => 'required|numeric',
+        'trailer' => 'nullable|url',
+    ]);
+
+    $film->update($request->all());
+
+    return redirect()->route('home')->with('success', 'Film berhasil diupdate');
+}
+
+//nonton trailer
+public function watch(Film $film)
+{
+    return view('films.watch', compact('film'));
+}
+
+
+    // Hapus film
+    public function destroy(Film $film)
+    {
+        $film->delete();
+
+        return redirect('/')
+            ->with('success', 'Film berhasil dihapus');
     }
 }
